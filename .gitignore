@@ -1,0 +1,10 @@
+# Ignore Python cache and environment
+__pycache__/
+*.pyc
+.env
+venv/
+*.log
+
+# Ignore IDE/editor files
+.idea/
+
