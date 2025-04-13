@@ -21,8 +21,8 @@ class BusinessIndustry(db.Model):
 class User(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False)
-    email = db.Column(db.String(120), unique=True, nullable=False)
-    phone_number = db.Column(db.Integer, unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=False, nullable=False)
+    phone_number = db.Column(db.Integer, unique=False, nullable=False)
     estd_date = db.Column(db.Date, nullable=False)  # can be nullable for non-business users.
     monthly_income = db.Column(db.Float)
     employment_status = db.Column(db.String)
@@ -30,16 +30,24 @@ class User(db.Model):
     industry_id = db.Column(db.Integer, db.ForeignKey(BusinessIndustry.id), nullable=True)
 
 
+class LendingType(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    type = db.Column(db.String)
+    pd_value = db.Column(db.Float)
+    lgd_value = db.Column(db.Float)
+
+
 class Loan(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey(User.id), nullable=False)
     loan_term = db.Column(db.Integer, nullable=False)
     loan_amount = db.Column(db.Float)
-    lending_type = db.Column(db.String)
+    lending_type = db.Column(db.Integer, db.ForeignKey(LendingType.id), nullable=False)
     interest_rate = db.Column(db.Float)
     collateral_value = db.Column(db.Float)
     outstanding_balance = db.Column(db.Float)
-    lending_type_factor = db.Column(db.Float)
+    un_drawn_commitment = db.Column(db.Float)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now())
 
 
 class Payment(db.Model):
@@ -49,7 +57,7 @@ class Payment(db.Model):
     date = db.Column(db.Date, nullable=False)
     amount = db.Column(db.Float)
     status = db.Column(db.String)
-    daysLate = db.Column(db.Integer, nullable=True)  # only if late payment.
+    daysLate = db.Column(db.Integer, nullable=True, default=0)  # only if late payment.
 
 
 class CIBData(db.Model):
@@ -99,7 +107,9 @@ class ECLData(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     loan_id = db.Column(db.Integer, db.ForeignKey(Loan.id), nullable=False)
     value = db.Column(db.Float)
+    ecl_amount = db.Column(db.Float)
     pd_value = db.Column(db.Float)
     lgd_value = db.Column(db.Float)
     ead_value = db.Column(db.Float)
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.now())
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.now())
