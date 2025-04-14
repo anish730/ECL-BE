@@ -1,0 +1,77 @@
+swagger: "2.0"
+info:
+  title: "Expecta"
+  description: "APIs for ECL"
+  version: "1.0.0"
+
+paths:
+  /api/v1/users:
+    post:
+      summary: "Create a new customer"
+      consumes:
+        - "application/json"
+      produces:
+        - "application/json"
+      parameters:
+        - in: "body"
+          name: "body"
+          description: "Vendor registration details"
+          required: true
+          schema:
+            type: "object"
+            required:
+              - name
+              - email
+              - phone_number
+              - estd_date
+              - monthly_income
+              - employment_status
+              - user_type
+              - industry_id
+            properties:
+              name:
+                type: "string"
+                description: "Name of the customer"
+              email:
+                type: "string"
+                format: "email"
+                description: "Email address of the customer"
+              phone_number:
+                type: "integer"
+                description: "Phone number of the user"
+              estd_date:
+                type: "date"
+                description: "Date"
+              monthly_income:
+                type: "float"
+                description: "Monthly Income of the user"
+              employment_status:
+                type: "string"
+                description: "User employed of not"
+              user_type:
+                type: "string"
+                description: "Type of user."
+              industry_id:
+                type: "integer"
+                description: "Which industry user belongs to?"
+      responses:
+        200:
+          description: "New Customer created successfully"
+          schema:
+            type: "object"
+            properties:
+              message:
+                type: "string"
+                example: "New Customer created successfully"
+        400:
+          description: "Bad Request - Invalid input"
+          schema:
+            type: "object"
+            properties:
+              error:
+                type: "string"
+                example: "Invalid input data"
+  /api/v1/business-industry:
+    get:
+  /api/v1/risk-decisions:
+    get:

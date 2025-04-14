@@ -1,5 +1,6 @@
 from flask import Flask
 from flask_cors import CORS
+from flasgger import Swagger
 from server import views
 from utils.encoder import DobatoEncoder
 from utils.extensions import db
@@ -18,6 +19,7 @@ def create_app():
 
 
 app = create_app()
+swagger = Swagger(app, template_file='swagger.yaml')
 CORS(app, resources={r"/*": {"origins": "*", "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
                              "headers": ["Content-Type", "Authorization", "ngrok-skip-browser-warning"]}})
 app.json = DobatoEncoder(app)

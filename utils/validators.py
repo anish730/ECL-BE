@@ -26,4 +26,4 @@ class LoanSchema(Schema):
     interest_rate = fields.Decimal(required=True)
     collateral_value = fields.Decimal(required=True)
     outstanding_balance = fields.Decimal(required=True)
-    un_drawn_commitment = fields.Decimal(required=True)
+    un_drawn_commitment = fields.Decimal(required=False, allow_none=True)

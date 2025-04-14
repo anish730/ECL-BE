@@ -63,10 +63,22 @@ class UserListApi(MethodView):
         }
         data = request.get_json()
         customer_schema = CustomerSchema()
+        user = db.session.query(User)
+
         try:
             validated_data = customer_schema.load(data)
         except ValidationError as err:
             return validation_error(err)
+
+        email = data.get('email')
+        email_exists = user.filter_by(email=email).first()
+        if email_exists:
+            return bad_request_error("Email already in use")
+
+        phone_number = data.get('phone_number')
+        number_exists = user.filter_by(phone_number=phone_number).first()
+        if number_exists:
+            return bad_request_error("Phone Number already in use")
         try:
             data_obj = User(**validated_data)
             db.session.add(data_obj)
@@ -93,6 +105,32 @@ class UserListApi(MethodView):
             .all()
         )
         return list_response(customers)
+
+    def put(self):
+        user_id = request.args.get('id')
+        data = request.get_json()
+        user = db.session.query(User).filter_by(id=user_id).first()
+
+        email = data.get('email')
+        email_exists = user.filter_by(email=email).first()
+        if email_exists:
+            return bad_request_error("Email already in use")
+
+        phone_number = data.get('phone_number')
+        number_exists = user.filter_by(phone_number=phone_number).first()
+        if number_exists:
+            return bad_request_error("Phone Number already in use")
+
+        try:
+            for key, value in data.items():
+                setattr(user, key, value)
+            db.session.commit()
+        except SQLAlchemyError as e:
+            db.session.rollback()
+            return server_error("Error updating data.")
+        finally:
+            db.session.close()
+            return success_response("Customer updated successfully")
 
 
 class RiskDecisionApi(MethodView):
