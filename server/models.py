@@ -67,10 +67,17 @@ class CIBData(db.Model):
     credit_score = db.Column(db.Float)
 
 
-class RiskDecision(db.Model):
+# class RiskDecision(db.Model):
+#     id = db.Column(db.Integer, primary_key=True)
+#     name = db.Column(db.String)
+#     parameter = db.Column(db.Float)
+#
+
+class ECLThreshold(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String)
-    parameter = db.Column(db.Float)
+    min_value = db.Column(db.Float, nullable=True)  # nullable for open ranges like "<2"
+    max_value = db.Column(db.Float, nullable=True)  # nullable for open ranges like ">5"
+    level = db.Column(db.String(20))  # "low", "medium", "high"
 
 
 class PDData(db.Model):

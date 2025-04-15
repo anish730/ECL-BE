@@ -8,8 +8,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import func, literal
 from sqlalchemy.orm import aliased
 from dateutil.relativedelta import relativedelta
+
+from utils.calculations import get_risk_level
 from utils.extensions import db
-from server.models import BusinessIndustry, User, RiskDecision, CIBData, Loan, Payment, LendingType, ECLData
+from server.models import BusinessIndustry, User, CIBData, Loan, Payment, LendingType, ECLData, \
+    ECLThreshold
 from utils.response import success_response, server_error, list_response, validation_error, not_found_error, \
     detail_response, bad_request_error
 from utils.validators import CustomerSchema, LoanSchema
@@ -93,7 +96,6 @@ class UserListApi(MethodView):
             return success_response("New Customer created successfully")
 
     def get(self):
-        # import pdb;pdb.set_trace()
         customers = (
             db.session.query(User)
             .outerjoin(Loan, Loan.user_id == User.id)
@@ -101,27 +103,56 @@ class UserListApi(MethodView):
             .outerjoin(BusinessIndustry, BusinessIndustry.id == User.industry_id)
             .group_by(User.id).with_entities(User.id,
                 User.name.label('name'),
+                User.email,
+                User.phone_number,
+                User.estd_date,
+                User.monthly_income,
+                User.employment_status,
+                User.user_type,
                 BusinessIndustry.name.label('business_name'),
+                BusinessIndustry.risk_factor.label('risk_factor'),
                 func.count(Loan.id).label("total_loans"),
-                func.avg(ECLData.value).label("average_ecl"))
+                func.avg(ECLData.value).label("average_ecl")
+                )
             .all()
         )
-        return list_response(customers)
+        customer_data = []
+        for user in customers:
+            data = {
+                'name': user.name,
+                'email': user.email,
+                'phone_number': user.phone_number,
+                'estd_date': user.estd_date,
+                'monthly_income': user.monthly_income,
+                'employment_status': user.employment_status,
+                'user_type': user.user_type,
+                'business_name': user.business_name,
+                'risk_factor': user.risk_factor,
+                'total_loans': user.total_loans,
+                'average_ecl': user.average_ecl,
+                'risk': get_risk_level(user.average_ecl) if user.average_ecl else get_risk_level(0)
+            }
+            customer_data.append(data)
+        return list_response(customer_data)
 
     def put(self):
         user_id = request.args.get('id')
         data = request.get_json()
         user = db.session.query(User).filter_by(id=user_id).first()
-
-        email = data.get('email')
-        email_exists = user.filter_by(email=email).first()
-        if email_exists:
-            return bad_request_error("Email already in use")
-
-        phone_number = data.get('phone_number')
-        number_exists = user.filter_by(phone_number=phone_number).first()
-        if number_exists:
-            return bad_request_error("Phone Number already in use")
+        if not user:
+            return not_found_error("User not found.")
+        if data.get('estd_date'):
+            date_obj = datetime.strptime(data.get('estd_date'), '%Y-%m-%d').date()
+            data['estd_date'] = date_obj
+        # email = data.get('email')
+        # email_exists = user.filter_by(email=email).first()
+        # if email_exists:
+        #     return bad_request_error("Email already in use")
+        #
+        # phone_number = data.get('phone_number')
+        # number_exists = user.filter_by(phone_number=phone_number).first()
+        # if number_exists:
+        #     return bad_request_error("Phone Number already in use")
 
         try:
             for key, value in data.items():
@@ -135,27 +166,30 @@ class UserListApi(MethodView):
             return success_response("Customer updated successfully")
 
 
-class RiskDecisionApi(MethodView):
+class RiskThresholdApi(MethodView):
     def post(self):
         request_data = [
             {
-                "name": "Low",
-                "parameter": 2.5
+                "min_value": None,
+                "max_value": 2,
+                "level": "low"
             },
             {
-                "name": "High",
-                "parameter": 5.0
+                "min_value": 2,
+                "max_value": 5,
+                "level": "medium"
             },
             {
-                "name": "Medium",
-                "parameter": 2.5
+                "min_value": 5,
+                "max_value": None,
+                "level": "high"
             }
         ]
         data = request.get_json()
         try:
             data_objs = []
             for d in data:
-                data_obj = RiskDecision(**d)
+                data_obj = ECLThreshold(**d)
                 data_objs.append(data_obj)
             db.session.bulk_save_objects(data_objs)
             db.session.commit()
@@ -164,29 +198,84 @@ class RiskDecisionApi(MethodView):
             return server_error("Error creating data.")
         finally:
             db.session.close()
-            return success_response("Risk decision parameter added successfully")
+            return success_response("ECL thresholds set successfully")
 
     def get(self):
-        risk_decision = db.session.query(RiskDecision).all()
-        return list_response(risk_decision)
+        threshold = db.session.query(ECLThreshold).all()
+        return list_response(threshold)
 
     def put(self):
         data = request.get_json()
         try:
             for d in data:
-                risk_id = d.get('id')
-                risk_decision = db.session.query(RiskDecision).filter_by(id=risk_id).first()
-                if not risk_decision:
-                    return not_found_error("Risk Decision parameter doesn't exists.")
+                threshold_id = d.get('id')
+                threshold = db.session.query(ECLThreshold).filter_by(id=threshold_id).first()
+                if not threshold:
+                    return not_found_error("ECL threshold parameter doesn't exists.")
                 for key, value in d.items():
-                    setattr(risk_decision, key, value)
+                    setattr(threshold, key, value)
             db.session.commit()
         except SQLAlchemyError as e:
             db.session.rollback()
             return server_error("Error updating data.")
         finally:
             db.session.close()
-            return success_response("Risk decision parameter updated successfully")
+
+        return success_response("ECL thresholds updated successfully")
+
+
+# class RiskDecisionApi(MethodView):
+#     def post(self):
+#         request_data = [
+#             {
+#                 "name": "Low",
+#                 "parameter": 2.5
+#             },
+#             {
+#                 "name": "High",
+#                 "parameter": 5.0
+#             },
+#             {
+#                 "name": "Medium",
+#                 "parameter": 2.5
+#             }
+#         ]
+#         data = request.get_json()
+#         try:
+#             data_objs = []
+#             for d in data:
+#                 data_obj = RiskDecision(**d)
+#                 data_objs.append(data_obj)
+#             db.session.bulk_save_objects(data_objs)
+#             db.session.commit()
+#         except SQLAlchemyError as e:
+#             db.session.rollback()
+#             return server_error("Error creating data.")
+#         finally:
+#             db.session.close()
+#             return success_response("Risk decision parameter added successfully")
+#
+#     def get(self):
+#         risk_decision = db.session.query(RiskDecision).all()
+#         return list_response(risk_decision)
+#
+#     def put(self):
+#         data = request.get_json()
+#         try:
+#             for d in data:
+#                 risk_id = d.get('id')
+#                 risk_decision = db.session.query(RiskDecision).filter_by(id=risk_id).first()
+#                 if not risk_decision:
+#                     return not_found_error("Risk Decision parameter doesn't exists.")
+#                 for key, value in d.items():
+#                     setattr(risk_decision, key, value)
+#             db.session.commit()
+#         except SQLAlchemyError as e:
+#             db.session.rollback()
+#             return server_error("Error updating data.")
+#         finally:
+#             db.session.close()
+#             return success_response("Risk decision parameter updated successfully")
 
 
 class FetchCIBData(MethodView):
@@ -333,11 +422,15 @@ class CustomerLoanApi(MethodView):
                 Loan.user_id,
                 Loan.loan_amount,
                 Loan.outstanding_balance,
+                Loan.loan_term,
+                Loan.interest_rate,
+                Loan.collateral_value,
+                Loan.lending_type,
                 User.name,
                 ECLLatest.value,
                 ECLLatest.ecl_amount,
                 ECLLatest.updated_at,
-                literal("low").label("risk")
+                literal(f"low").label("risk")
             )
             .join(User, User.id == Loan.user_id)
             .outerjoin(
@@ -351,8 +444,26 @@ class CustomerLoanApi(MethodView):
         )
         if user_id:
             loan_data = loan_data.filter(Loan.user_id == user_id)
-
         loan_data = loan_data.all()
+        result = []
+        for loan in loan_data:
+            data = {
+                "id": loan.id,
+                "loan_name": loan.loan_name,
+                "user_id": loan.user_id,
+                "loan_amount": loan.loan_amount,
+                "outstanding_balance": loan.outstanding_balance,
+                "loan_term": loan.loan_term,
+                "interest_rate": loan.interest_rate,
+                "collateral_value": loan.collateral_value,
+                "lending_type": loan.lending_type,
+                "name": loan.name,
+                "value": loan.value,
+                "ecl_amount": loan.ecl_amount,
+                "updated_at": loan.updated_at,
+                "risk": get_risk_level(loan.value) if loan.value else get_risk_level(0)
+            }
+
         # loan_data = (db.session.query(Loan)
         #              .outerjoin(User, User.id == Loan.user_id)
         #              .outerjoin(ECLData, Loan.id == ECLData.loan_id)
@@ -365,6 +476,25 @@ class CustomerLoanApi(MethodView):
         #                             ECLData.value, ECLData.ecl_amount, ECLData.updated_at, ECLData.risk).all()
 
         return list_response(loan_data)
+
+    def put(self):
+        loan_id = request.args.get('id')
+        user_id = request.args.get('user_id')
+        loan = db.session.query(Loan).filter_by(id=loan_id, user_id=user_id).first()
+        if not loan:
+            return bad_request_error("Loan doesn't exists.")
+
+        data = request.get_json()
+        try:
+            for key, value in data.items():
+                setattr(loan, key, value)
+            db.session.commit()
+        except SQLAlchemyError:
+            db.session.rollback()
+            return server_error("Error updating data")
+        finally:
+            db.session.rollback()
+            return success_response("Loan data updated successfully.")
 
 
 class ECLCalculationApi(MethodView):

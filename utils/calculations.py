@@ -1,8 +1,8 @@
 from datetime import datetime
 
 from sqlalchemy import func
-from extensions import db
-from server.models import CIBData, Payment, BusinessIndustry, User, Loan
+from utils.extensions import db
+from server.models import CIBData, Payment, BusinessIndustry, User, Loan, ECLThreshold
 
 
 def calculate_pd(user_id, loan_id=None):
@@ -57,3 +57,16 @@ def calculate_ecl(pd, lgd, ead, loan_amount=None, loan_id=None):
     ecl_ratio = ecl / loan_amount
 
     return ecl_ratio
+
+
+def get_risk_level(value):
+    thresholds = ECLThreshold.query.all()
+    for threshold in thresholds:
+        if threshold.min_value is None and value < threshold.max_value:
+            return threshold.level
+        elif threshold.max_value is None and value >= threshold.min_value:
+            return threshold.level
+        elif threshold.min_value is not None and threshold.max_value is not None:
+            if threshold.min_value <= value < threshold.max_value:
+                return threshold.level
+    return "unknown"
