@@ -20,6 +20,7 @@ class CustomerSchema(Schema):
 
 class LoanSchema(Schema):
     user_id = fields.Integer(required=True)
+    loan_name = fields.String(required=True)
     loan_term = fields.Integer(required=True)
     loan_amount = fields.Decimal(required=True)
     lending_type = fields.Integer(required=True)

@@ -39,6 +39,7 @@ class LendingType(db.Model):
 
 class Loan(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    loan_name = db.Column(db.String)
     user_id = db.Column(db.Integer, db.ForeignKey(User.id), nullable=False)
     loan_term = db.Column(db.Integer, nullable=False)
     loan_amount = db.Column(db.Float)

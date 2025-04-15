@@ -5,7 +5,9 @@ from flask.views import MethodView
 from flask import request
 from marshmallow import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import func
+from sqlalchemy import func, literal
+from sqlalchemy.orm import aliased
+from dateutil.relativedelta import relativedelta
 from utils.extensions import db
 from server.models import BusinessIndustry, User, RiskDecision, CIBData, Loan, Payment, LendingType, ECLData
 from utils.response import success_response, server_error, list_response, validation_error, not_found_error, \
@@ -277,6 +279,7 @@ class CustomerLoanApi(MethodView):
     def post(self):
         request_data = {
             "user_id": 1,
+            "loan_name": "Gharyasi Loan",
             "loan_term": 60,
             "loan_amount": 1000000,
             "lending_type": 1,
@@ -307,11 +310,60 @@ class CustomerLoanApi(MethodView):
             return success_response("Loan created successfully")
 
     def get(self):
-        loan_data = (db.session.query(Loan)
-                     .outerjoin(User, User.id == Loan.user_id)
-                     .outerjoin(ECLData, Loan.id == ECLData.loan_id)
-                     .with_entities(Loan.id, Loan.user_id, Loan.loan_amount, Loan.outstanding_balance, User.name,
-                                    ECLData.value, ECLData.ecl_amount, ECLData.updated_at)).all()
+        user_id = request.args.get('user_id')
+
+        # Subquery to get max ID per loan_id
+        latest_ecl_subquery = (
+            db.session.query(
+                ECLData.loan_id,
+                func.max(ECLData.id).label('latest_id')
+            )
+            .group_by(ECLData.loan_id)
+            .subquery()
+        )
+
+        # Alias for joining with ECLData again
+        ECLLatest = aliased(ECLData)
+
+        # Final query: join Loan, User, and latest ECL row
+        loan_data = (
+            db.session.query(
+                Loan.id,
+                Loan.loan_name,
+                Loan.user_id,
+                Loan.loan_amount,
+                Loan.outstanding_balance,
+                User.name,
+                ECLLatest.value,
+                ECLLatest.ecl_amount,
+                ECLLatest.updated_at,
+                literal("low").label("risk")
+            )
+            .join(User, User.id == Loan.user_id)
+            .outerjoin(
+                latest_ecl_subquery,
+                Loan.id == latest_ecl_subquery.c.loan_id
+            )
+            .outerjoin(
+                ECLLatest,
+                ECLLatest.id == latest_ecl_subquery.c.latest_id
+            )
+        )
+        if user_id:
+            loan_data = loan_data.filter(Loan.user_id == user_id)
+
+        loan_data = loan_data.all()
+        # loan_data = (db.session.query(Loan)
+        #              .outerjoin(User, User.id == Loan.user_id)
+        #              .outerjoin(ECLData, Loan.id == ECLData.loan_id)
+        #              )
+        # if user_id:
+        #     loan_data = loan_data.filter(Loan.user_id == user_id)
+        #
+        # loan_data = loan_data.with_entities(Loan.id, Loan.loan_name, Loan.user_id, Loan.loan_amount,
+        #                                     Loan.outstanding_balance, User.name,
+        #                             ECLData.value, ECLData.ecl_amount, ECLData.updated_at, ECLData.risk).all()
+
         return list_response(loan_data)
 
 
@@ -319,7 +371,7 @@ class ECLCalculationApi(MethodView):
     def post(self):
         request_data = {
             "user_id": "P12345",
-            "loan_id": "id" or None,
+            "loan_id": "id",
             "name": "John Smith",
             "credit_score": 680,
             "industry_name": "N/A",
@@ -361,6 +413,9 @@ class ECLCalculationApi(MethodView):
         #     daysLate = late_payment.daysLate
         # else:
         #     daysLate = 0
+        loan = db.session.query(Loan).filter_by(id=loan_id, user_id=user_id).first()
+        if not loan:
+            return not_found_error("Loan doesn't exits.")
         history_factor = (missed_payments * 0.15) + (late_payment * 0.05)
 
         # past_due_days = missed_payment.with_entities(func.sum(Payment.daysLate)).scalar()
@@ -374,6 +429,7 @@ class ECLCalculationApi(MethodView):
         pd = (base_score + history_factor + due_days_factor + industry_risk - experience_factor) * lending_type_factor.pd_value
 
         # lgd calculation part
+
         collateral_ratio = collateral_value / outstanding_loan_amount
         base_lgd = 1 - min(1, collateral_ratio)
         recovery_ratio = recovery_cost / outstanding_loan_amount
@@ -401,13 +457,29 @@ class ECLCalculationApi(MethodView):
             "lgd": final_lgd,
             "ead": ead
         }
-        return success_response("Success", data)
+        try:
+            data_obj = ECLData(
+                loan_id=loan_id,
+                value=ecl_ratio,
+                ecl_amount=ecl,
+                pd_value=pd,
+                lgd_value=final_lgd,
+                ead_value=ead
+            )
+            db.session.add(data_obj)
+            db.session.commit()
+        except SQLAlchemyError:
+            db.session.rollback()
+            return server_error("Error creating ecl-data.")
+        finally:
+            db.session.close()
+            return success_response("Success", data)
 
     def get(self):
         user_id = request.args.get('user_id')
+        loan_id = request.args.get('loan_id')
         user_data = db.session.query(User).filter_by(id=user_id).first()
 
-        from dateutil.relativedelta import relativedelta
         today = date.today()
 
         # Calculate the difference
@@ -432,8 +504,9 @@ class ECLCalculationApi(MethodView):
         else:
             credit_score = cib_data.credit_score
 
-        late_payments = (db.session.query(Payment)
-                    .filter(and_(Payment.user_id == user_id, Payment.status == 'late')))
+        payments = (db.session.query(Payment)
+                    .filter(Payment.loan_id == loan_id))
+        late_payments = payments.filter(Payment.status == 'late')
         num_late_payments = late_payments.count()
         # daysLate = late_payments.with_entities(func.sum(Payment.daysLate).label('days_late')).first()
         # if daysLate:
@@ -441,7 +514,7 @@ class ECLCalculationApi(MethodView):
         # else:
         #     days_late = 0
 
-        missed_payments = late_payments.filter(Payment.daysLate > 90).count()
+        missed_payments = payments.filter(Payment.status == 'missed').count()
         daysLate = late_payments.with_entities(func.sum(Payment.daysLate)).scalar()
         if not daysLate:
             daysLate = 0
@@ -449,7 +522,7 @@ class ECLCalculationApi(MethodView):
         # pdb.set_trace()
         history_factor = (missed_payments * 0.15) + (daysLate * 0.05)
 
-        loan = db.session.query(Loan).filter_by(user_id=user_id).order_by(Loan.id.desc()).first()
+        loan = db.session.query(Loan).filter_by(id=loan_id).order_by(Loan.id.desc()).first()
         if loan:
             loan_amount = loan.loan_amount
             collateral_value = loan.collateral_value
@@ -490,8 +563,9 @@ class LoanPaymentsApi(MethodView):
             "daysLate": 0
         }
         data = request.get_json()
-        date = datetime.now()
-        data['date'] = date
+        date_obj = datetime.strptime(data.get('date'), '%Y-%m-%d').date()
+        data['date'] = date_obj
+
         # try:
         #     validated_data = loan_schema.load(data)
         # except ValidationError as err:
@@ -513,5 +587,5 @@ class LoanPaymentsApi(MethodView):
     def get(self):
         user_id = request.args.get('user_id')
         loan_id = request.args.get('loan_id')
-        payments = db.session.query(Payment).filter_by(user_id=user_id).all()
+        payments = db.session.query(Payment).filter_by(user_id=user_id, loan_id=loan_id).all()
         return list_response(payments)
