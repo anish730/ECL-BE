@@ -573,6 +573,7 @@ class ECLCalculationApi(MethodView):
         # ecl calculation part
         ecl = pd * final_lgd * ead
         ecl_ratio = ecl / ead
+        ecl_ratio = ecl_ratio * 100
         if ecl_ratio < 2:
             risk = "Low risk"
         elif ecl_ratio in range(2, 6):
