@@ -111,13 +111,21 @@ class UserListApi(MethodView):
                 User.user_type,
                 BusinessIndustry.name.label('business_name'),
                 BusinessIndustry.risk_factor.label('risk_factor'),
-                func.count(Loan.id).label("total_loans"),
+                # func.count(Loan.id).label("total_loans"),
                 func.avg(ECLData.value).label("average_ecl")
                 )
             .all()
         )
         customer_data = []
         for user in customers:
+            avg_ecl_query = (
+                db.session.query(func.avg(ECLData.value))
+                .join(Loan, Loan.id == ECLData.loan_id)
+                .join(User, User.id == Loan.user_id)
+                .filter(User.id == user.id)
+            )
+
+            avg_ecl_value = avg_ecl_query.scalar()
             data = {
                 'id': user.id,
                 'name': user.name,
@@ -129,8 +137,8 @@ class UserListApi(MethodView):
                 'user_type': user.user_type,
                 'business_name': user.business_name,
                 'risk_factor': user.risk_factor,
-                'total_loans': user.total_loans,
-                'average_ecl': user.average_ecl,
+                'total_loans': db.session.query(Loan).filter_by(user_id=user.id).count(),
+                'average_ecl': avg_ecl_value,
                 'risk': get_risk_level(user.average_ecl) if user.average_ecl else get_risk_level(0)
             }
             customer_data.append(data)
@@ -641,8 +649,6 @@ class ECLCalculationApi(MethodView):
         daysLate = late_payments.with_entities(func.sum(Payment.daysLate)).scalar()
         if not daysLate:
             daysLate = 0
-        # import pdb;
-        # pdb.set_trace()
         history_factor = (missed_payments * 0.15) + (daysLate * 0.05)
 
         loan = db.session.query(Loan).filter_by(id=loan_id).order_by(Loan.id.desc()).first()
