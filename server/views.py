@@ -430,8 +430,7 @@ class CustomerLoanApi(MethodView):
                 User.name,
                 ECLLatest.value,
                 ECLLatest.ecl_amount,
-                ECLLatest.updated_at,
-                literal(f"low").label("risk")
+                ECLLatest.updated_at
             )
             .join(User, User.id == Loan.user_id)
             .outerjoin(
@@ -464,19 +463,9 @@ class CustomerLoanApi(MethodView):
                 "updated_at": loan.updated_at,
                 "risk": get_risk_level(loan.value) if loan.value else get_risk_level(0)
             }
+            result.append(data)
 
-        # loan_data = (db.session.query(Loan)
-        #              .outerjoin(User, User.id == Loan.user_id)
-        #              .outerjoin(ECLData, Loan.id == ECLData.loan_id)
-        #              )
-        # if user_id:
-        #     loan_data = loan_data.filter(Loan.user_id == user_id)
-        #
-        # loan_data = loan_data.with_entities(Loan.id, Loan.loan_name, Loan.user_id, Loan.loan_amount,
-        #                                     Loan.outstanding_balance, User.name,
-        #                             ECLData.value, ECLData.ecl_amount, ECLData.updated_at, ECLData.risk).all()
-
-        return list_response(loan_data)
+        return list_response(result)
 
     def put(self):
         loan_id = request.args.get('id')
@@ -574,17 +563,19 @@ class ECLCalculationApi(MethodView):
         ecl = pd * final_lgd * ead
         ecl_ratio = ecl / ead
         ecl_ratio = ecl_ratio * 100
-        if ecl_ratio < 2:
-            risk = "Low risk"
-        elif ecl_ratio in range(2, 6):
-            risk = "Medium risk"
-        else:
-            risk = "High risk"
+
+        risk = get_risk_level(ecl_ratio)
+        # if ecl_ratio < 2:
+        #     risk = "Low risk"
+        # elif ecl_ratio in range(2, 6):
+        #     risk = "Medium risk"
+        # else:
+        #     risk = "High risk"
 
         data = {
             "ecl_amount": ecl,
             "ecl_percentage": ecl_ratio,
-            "risk": risk,
+            "risk": risk + " risk",
             "pd": pd,
             "lgd": final_lgd,
             "ead": ead
@@ -697,7 +688,10 @@ class LoanPaymentsApi(MethodView):
         data = request.get_json()
         date_obj = datetime.strptime(data.get('date'), '%Y-%m-%d').date()
         data['date'] = date_obj
-
+        loan_id = data.get('loan_id')
+        loan = db.session.query(Loan).filter_by(id=loan_id).first()
+        if not loan:
+            return bad_request_error("Loan doesn't exists")
         # try:
         #     validated_data = loan_schema.load(data)
         # except ValidationError as err:
@@ -708,6 +702,7 @@ class LoanPaymentsApi(MethodView):
         try:
             data_obj = Payment(**data)
             db.session.add(data_obj)
+            loan.outstanding_balance -= data.get('amount')
             db.session.commit()
         except SQLAlchemyError as e:
             db.session.rollback()
